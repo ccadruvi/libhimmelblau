@@ -2792,6 +2792,20 @@ impl PublicClientApplication {
             };
         }
 
+        debug!("Credential type: pref_credential={}, has_password={}, has_fido={:?}, has_remote_ngc={:?}, has_access_pass={:?}",
+            cred_type.credentials.pref_credential,
+            cred_type.credentials.has_password,
+            cred_type.credentials.has_fido,
+            cred_type.credentials.has_remote_ngc,
+            cred_type.credentials.has_access_pass,
+        );
+        if let Some(ref fido_params) = cred_type.credentials.fido_params {
+            debug!("FIDO params: has_cross_device_capable_passkey={:?}, allow_list_count={}",
+                fido_params.has_cross_device_capable_passkey,
+                fido_params.fido_allow_list.len(),
+            );
+        }
+
         let fido_is_a_passkey = cred_type
             .credentials
             .fido_params
@@ -2806,49 +2820,45 @@ impl PublicClientApplication {
             () => {
                 if options.contains(&AuthOption::PasswordlessFido) {
                     if let Some(ref fido_params) = cred_type.credentials.fido_params {
-                        // If this is a Passkey, bail out. We don't support passkey auth
-                        if !fido_is_a_passkey {
-                            // Passwordless fido is enabled, we can drop out here
-                            let url_post = match &auth_config.url_post {
-                                Some(url_post) => url_post.clone(),
-                                None => {
-                                    return Err(MsalError::GeneralFailure(
-                                        "urlBeginAuth is missing".to_string(),
-                                    ))
-                                }
-                            };
-                            auth_config.fido_allow_list = Some(fido_params.fido_allow_list.clone());
-                            let fido_auth_config = self
-                                .handle_auth_config_fido_get(username, &auth_config, &request_id)
-                                .await?;
-                            return Ok(MFAAuthContinue {
-                                msg: "".to_string(),
-                                entropy: None,
-                                max_poll_attempts: auth_config.max_poll_attempts,
-                                polling_interval: Some(5000),
-                                session_id: fido_auth_config.session_id,
-                                flow_token: sft,
-                                ctx: sctx,
-                                canary: auth_config.canary,
-                                url_end_auth: auth_config.url_end_auth,
-                                url_post,
-                                resource: resource.map(|s| s.to_string()),
-                                dag: None,
-                                fido_challenge: fido_auth_config.fido_challenge,
-                                fido_allow_list: Some(fido_params.fido_allow_list.clone()),
-                                cross_domain_canary: fido_auth_config.cross_domain_canary,
-                                url_session_state: auth_config.url_session_state,
-                                mfa_methods: vec!["FidoKey".to_string()].into(),
-                                mfa_method_details: vec![MfaMethodInfo {
-                                    auth_method_id: "FidoKey".to_string(),
-                                    display: "FidoKey".to_string(),
-                                    is_default: true,
-                                }],
-                                selected_mfa_method_id: Some("FidoKey".to_string()),
-                                auth_code: None,
-                                fido_is_passkey: false,
-                            });
-                        }
+                        let url_post = match &auth_config.url_post {
+                            Some(url_post) => url_post.clone(),
+                            None => {
+                                return Err(MsalError::GeneralFailure(
+                                    "urlBeginAuth is missing".to_string(),
+                                ))
+                            }
+                        };
+                        auth_config.fido_allow_list = Some(fido_params.fido_allow_list.clone());
+                        let fido_auth_config = self
+                            .handle_auth_config_fido_get(username, &auth_config, &request_id)
+                            .await?;
+                        return Ok(MFAAuthContinue {
+                            msg: "".to_string(),
+                            entropy: None,
+                            max_poll_attempts: auth_config.max_poll_attempts,
+                            polling_interval: Some(5000),
+                            session_id: fido_auth_config.session_id,
+                            flow_token: sft,
+                            ctx: sctx,
+                            canary: auth_config.canary,
+                            url_end_auth: auth_config.url_end_auth,
+                            url_post,
+                            resource: resource.map(|s| s.to_string()),
+                            dag: None,
+                            fido_challenge: fido_auth_config.fido_challenge,
+                            fido_allow_list: Some(fido_params.fido_allow_list.clone()),
+                            cross_domain_canary: fido_auth_config.cross_domain_canary,
+                            url_session_state: auth_config.url_session_state,
+                            mfa_methods: vec!["FidoKey".to_string()].into(),
+                            mfa_method_details: vec![MfaMethodInfo {
+                                auth_method_id: "FidoKey".to_string(),
+                                display: "FidoKey".to_string(),
+                                is_default: true,
+                            }],
+                            selected_mfa_method_id: Some("FidoKey".to_string()),
+                            auth_code: None,
+                            fido_is_passkey: false,
+                        });
                     }
                 }
             };
@@ -2999,8 +3009,14 @@ impl PublicClientApplication {
                     }
                 }
                 if let Some(ref arr_user_proofs) = auth_config.arr_user_proofs {
-                    let fido_is_a_passkey = fido_is_a_passkey
-                        || auth_config.is_passkey_support_enabled.unwrap_or(false);
+                    debug!("MFA methods available (arr_user_proofs): [{}]",
+                        arr_user_proofs.iter()
+                            .map(|p| format!("{}(default={})", p.auth_method_id, p.is_default))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    debug!("is_passkey_support_enabled={:?}, fido_is_a_passkey={}",
+                        auth_config.is_passkey_support_enabled, fido_is_a_passkey);
 
                     // Try to use provided MFA method if available
                     let selected_auth_method = if let Some(requested_method) = mfa_method {
@@ -3008,7 +3024,6 @@ impl PublicClientApplication {
                             .iter()
                             .find(|proof| {
                                 proof.auth_method_id == requested_method
-                                    && (!fido_is_a_passkey || proof.auth_method_id != "FidoKey")
                             })
                             .ok_or_else(|| {
                                 let available = arr_user_proofs
@@ -3022,25 +3037,8 @@ impl PublicClientApplication {
                             })?
                     } else if let Some(method) = arr_user_proofs.iter().find(|proof| {
                         proof.is_default
-                            && (!fido_is_a_passkey || proof.auth_method_id != "FidoKey")
                     }) {
                         method
-                    } else if fido_is_a_passkey {
-                        // Skip FidoKey methods entirely if we can't use them
-                        match arr_user_proofs
-                            .iter()
-                            .find(|proof| proof.auth_method_id == "PhoneAppNotification")
-                            .or_else(|| {
-                                arr_user_proofs
-                                    .iter()
-                                    .find(|proof| proof.auth_method_id != "FidoKey")
-                            }) {
-                            Some(method) => method,
-                            None => {
-                                info!("No usable MFA methods found (FIDO was passkey)");
-                                dag_fallback!();
-                            }
-                        }
                     } else if arr_user_proofs.is_empty() {
                         info!("No MFA methods found");
                         dag_fallback!();
@@ -6955,9 +6953,96 @@ impl BrokerClientApplication {
     }
 }
 
+/// Determine whether FIDO credentials should be treated as passkeys
+/// (cross-device capable, e.g. MS Authenticator) based on Azure's
+/// GetCredentialType response.
+#[allow(dead_code)]
+fn compute_fido_is_a_passkey(fido_params: Option<&FidoParams>) -> bool {
+    fido_params
+        .map(|fp| fp.has_cross_device_capable_passkey.unwrap_or(false))
+        .unwrap_or(false)
+}
+
+/// Determine which pre-password passwordless method to attempt based on
+/// `pref_credential` and available credentials.
+///
+/// Returns the method to attempt: "Fido", "RemoteNgc", "Tap", or None
+/// if no passwordless method should be attempted.
+#[allow(dead_code)]
+fn select_passwordless_method(
+    pref_credential: u8,
+    has_fido: bool,
+    _fido_is_a_passkey: bool,
+    has_remote_ngc: bool,
+    has_access_pass: bool,
+    passwordless_fido_enabled: bool,
+) -> Option<&'static str> {
+    // Try preferred method first
+    let preferred = match pref_credential {
+        13 if has_access_pass => Some("Tap"),
+        7 if has_remote_ngc => Some("RemoteNgc"),
+        2 if has_fido && passwordless_fido_enabled => Some("Fido"),
+        _ => None,
+    };
+    if preferred.is_some() {
+        return preferred;
+    }
+
+    // Fallback: try each passwordless method in priority order
+    if has_access_pass {
+        return Some("Tap");
+    }
+    if has_remote_ngc {
+        return Some("RemoteNgc");
+    }
+    if has_fido && passwordless_fido_enabled {
+        return Some("Fido");
+    }
+    None
+}
+
+/// Select which MFA method to use from the available `arr_user_proofs`
+/// after password authentication.
+///
+/// Returns the index into `proofs` of the selected method, or an error
+/// description if no usable method is found.
+#[allow(dead_code)]
+fn select_mfa_method<'a>(
+    proofs: &'a [ArrUserProofs],
+    _fido_is_a_passkey: bool,
+    _is_passkey_support_enabled: bool,
+    requested_method: Option<&str>,
+) -> Result<&'a ArrUserProofs, String> {
+    if let Some(requested) = requested_method {
+        return proofs
+            .iter()
+            .find(|p| p.auth_method_id == requested)
+            .ok_or_else(|| {
+                let available: Vec<&str> = proofs.iter().map(|p| p.auth_method_id.as_str()).collect();
+                format!(
+                    "Requested MFA method '{}' not available. Available: {}",
+                    requested,
+                    available.join(", ")
+                )
+            });
+    }
+
+    if let Some(method) = proofs.iter().find(|p| p.is_default) {
+        return Ok(method);
+    }
+
+    if proofs.is_empty() {
+        return Err("No MFA methods found".to_string());
+    }
+
+    // MS sometimes doesn't set is_default; fallback to the first
+    Ok(&proofs[0])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpmock::prelude::*;
 
     fn build_access_token(payload_json: &str) -> String {
         let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"none"}"#.as_bytes());
@@ -7008,5 +7093,401 @@ mod tests {
         let token = build_user_token(access_token);
 
         assert_eq!(token.spn().unwrap_or_default(), "primary@example.com");
+    }
+
+    // --- MFA scenario test helpers ---
+
+    fn build_config_html(config_json: &str) -> String {
+        // scraper encodes > to &gt; in inner_html(), so source must use literal >
+        format!(
+            "<html><body><script>$Config={};\n//]]></script></body></html>",
+            config_json
+        )
+    }
+
+    fn build_auth_config(base_url: &str) -> AuthConfig {
+        json_from_str(&format!(
+            r#"{{
+                "sessionId": "test-session",
+                "sFT": "test-flow-token",
+                "sCtx": "test-ctx",
+                "urlPost": "{base_url}/common/login",
+                "canary": "test-canary",
+                "urlGetCredentialType": "{base_url}/common/GetCredentialType",
+                "urlGetOneTimeCode": "{base_url}/common/GetOneTimeCode",
+                "urlFidoLogin": "{base_url}/common/fidoLogin",
+                "urlResume": "{base_url}/common/resume",
+                "iAllowedIdentities": 2048,
+                "urlBeginAuth": "{base_url}/common/BeginAuth",
+                "urlEndAuth": "{base_url}/common/EndAuth"
+            }}"#
+        ))
+        .expect("failed to parse test AuthConfig")
+    }
+
+    fn build_cred_type(
+        pref_credential: u8,
+        has_password: bool,
+        fido_allow_list: Option<Vec<&str>>,
+        has_cross_device: Option<bool>,
+        has_remote_ngc: bool,
+    ) -> CredType {
+        let fido_params = fido_allow_list.map(|list| {
+            let list_json: Vec<String> = list.iter().map(|s| format!("\"{}\"", s)).collect();
+            format!(
+                r#"{{"AllowList": [{}], "HasCrossDeviceCapablePasskey": {}}}"#,
+                list_json.join(","),
+                has_cross_device
+                    .map(|v| v.to_string())
+                    .unwrap_or("null".to_string())
+            )
+        });
+
+        let json_str = format!(
+            r#"{{
+                "Credentials": {{
+                    "HasPassword": {has_password},
+                    "PrefCredential": {pref_credential},
+                    "HasFido": {has_fido},
+                    "HasRemoteNGC": {has_remote_ngc},
+                    "HasAccessPass": false
+                    {fido_params_field}
+                    {remote_ngc_field}
+                }},
+                "ThrottleStatus": 0,
+                "IfExistsResult": 0
+            }}"#,
+            has_fido = fido_params.is_some(),
+            fido_params_field = fido_params
+                .as_ref()
+                .map(|fp| format!(r#", "FidoParams": {fp}"#))
+                .unwrap_or_default(),
+            remote_ngc_field = if has_remote_ngc {
+                r#", "RemoteNgcParams": {"SessionIdentifier": "ngc-session", "Entropy": 42}"#
+                    .to_string()
+            } else {
+                String::new()
+            },
+        );
+
+        json_from_str(&json_str).expect("failed to parse test CredType")
+    }
+
+    // Scenario 1: Passkeys enforced, Yubikeys only → passwordless FIDO selected
+    #[tokio::test]
+    async fn mfa_scenario_1_passwordless_fido_yubikey() {
+        let server = MockServer::start_async().await;
+        let base_url = server.base_url();
+
+        let auth_config = build_auth_config(&base_url);
+        let cred_type = build_cred_type(
+            2,     // pref_credential: FIDO
+            false, // has_password
+            Some(vec!["credential-id-yubikey-1"]),
+            None,  // no cross_device
+            false, // no remote NGC
+        );
+        let auth_init = AuthInit { auth_config, cred_type };
+
+        // Mock the FIDO login endpoint (handle_auth_config_fido_get)
+        let fido_config_json = format!(
+            r#"{{
+                "sessionId": "fido-session",
+                "sFT": "fido-flow-token",
+                "sCtx": "fido-ctx",
+                "canary": "fido-canary",
+                "sFidoChallenge": "test-fido-challenge",
+                "sCrossDomainCanary": "test-cross-domain-canary",
+                "urlPost": "{base_url}/common/login"
+            }}"#
+        );
+        server.mock_async(|when, then| {
+            when.method(POST).path("/common/fidoLogin");
+            then.status(200)
+                .header("content-type", "text/html")
+                .body(build_config_html(&fido_config_json));
+        })
+        .await;
+
+        let app =
+            PublicClientApplication::new("test-client-id", Some(&base_url)).unwrap();
+        let result = app
+            .initiate_acquire_token_by_mfa_flow(
+                "user@example.com",
+                None,
+                vec!["openid"],
+                None,
+                &[
+                    AuthOption::Fido,
+                    AuthOption::PasswordlessFido,
+                    AuthOption::NoDAGFallback,
+                ],
+                Some(auth_init),
+                #[cfg(feature = "mfa_method_selection")]
+                None,
+            )
+            .await;
+
+        let mfa_continue = result.expect("should succeed with passwordless FIDO");
+        assert_eq!(
+            mfa_continue.selected_mfa_method_id,
+            Some("FidoKey".to_string())
+        );
+        assert_eq!(
+            mfa_continue.fido_allow_list,
+            Some(vec!["credential-id-yubikey-1".to_string()])
+        );
+        assert!(!mfa_continue.fido_is_passkey);
+        assert_eq!(
+            mfa_continue.fido_challenge,
+            Some("test-fido-challenge".to_string())
+        );
+        assert_eq!(mfa_continue.session_id, "fido-session");
+    }
+
+    // Scenario 2: Passkeys enforced, MS Authenticator only → RemoteNGC
+    #[tokio::test]
+    async fn mfa_scenario_2_passkey_enforced_ms_authenticator() {
+        let server = MockServer::start_async().await;
+        let base_url = server.base_url();
+
+        let auth_config = build_auth_config(&base_url);
+        let cred_type = build_cred_type(
+            7,     // pref_credential: RemoteNGC
+            false, // has_password
+            Some(vec!["credential-id-passkey"]),
+            Some(true), // has_cross_device_capable_passkey
+            true,  // has_remote_ngc
+        );
+        let auth_init = AuthInit { auth_config, cred_type };
+
+        // Mock GetOneTimeCode endpoint (called by passwordless_remote_ngc!)
+        server.mock_async(|when, then| {
+            when.method(POST).path("/common/GetOneTimeCode");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"RemoteNgcParams": {"SessionIdentifier": "ngc-new-session", "Entropy": 55}}"#,
+                );
+        })
+        .await;
+
+        let app =
+            PublicClientApplication::new("test-client-id", Some(&base_url)).unwrap();
+        let result = app
+            .initiate_acquire_token_by_mfa_flow(
+                "user@example.com",
+                None,
+                vec!["openid"],
+                None,
+                &[
+                    AuthOption::Fido,
+                    AuthOption::Passwordless,
+                    AuthOption::PasswordlessFido,
+                    AuthOption::NoDAGFallback,
+                ],
+                Some(auth_init),
+                #[cfg(feature = "mfa_method_selection")]
+                None,
+            )
+            .await;
+
+        let mfa_continue = result.expect("should succeed with RemoteNGC");
+        assert_eq!(
+            mfa_continue.selected_mfa_method_id,
+            Some("PhoneAppNotification".to_string())
+        );
+        assert!(!mfa_continue.fido_is_passkey);
+        assert_eq!(mfa_continue.entropy, Some(55));
+        assert!(mfa_continue.msg.contains("55"));
+    }
+
+    // Scenario 3: Passkeys enforced, both Yubikey + MS Auth → FIDO blocked, RemoteNGC used
+    #[tokio::test]
+    async fn mfa_scenario_3_passkey_both_yubikey_and_ms_auth() {
+        let server = MockServer::start_async().await;
+        let base_url = server.base_url();
+
+        let auth_config = build_auth_config(&base_url);
+        let cred_type = build_cred_type(
+            7,     // pref_credential: RemoteNGC
+            false, // has_password
+            Some(vec!["credential-id-yubikey", "credential-id-passkey"]),
+            Some(true), // has_cross_device = true → blocks FIDO
+            true,  // has_remote_ngc
+        );
+        let auth_init = AuthInit { auth_config, cred_type };
+
+        // Mock GetOneTimeCode
+        server.mock_async(|when, then| {
+            when.method(POST).path("/common/GetOneTimeCode");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"RemoteNgcParams": {"SessionIdentifier": "ngc-session-3", "Entropy": 77}}"#,
+                );
+        })
+        .await;
+
+        let app =
+            PublicClientApplication::new("test-client-id", Some(&base_url)).unwrap();
+        let result = app
+            .initiate_acquire_token_by_mfa_flow(
+                "user@example.com",
+                None,
+                vec!["openid"],
+                None,
+                &[
+                    AuthOption::Fido,
+                    AuthOption::Passwordless,
+                    AuthOption::PasswordlessFido,
+                    AuthOption::NoDAGFallback,
+                ],
+                Some(auth_init),
+                #[cfg(feature = "mfa_method_selection")]
+                None,
+            )
+            .await;
+
+        let mfa_continue = result.expect("should succeed with RemoteNGC (FIDO blocked)");
+        assert_eq!(
+            mfa_continue.selected_mfa_method_id,
+            Some("PhoneAppNotification".to_string())
+        );
+        assert!(!mfa_continue.fido_is_passkey);
+        assert_eq!(mfa_continue.entropy, Some(77));
+    }
+
+    // Scenario 4: No passkey enforcement, MS Auth as MFA → password then PhoneAppNotification
+    #[tokio::test]
+    async fn mfa_scenario_4_password_then_phone_app_mfa() {
+        let server = MockServer::start_async().await;
+        let base_url = server.base_url();
+
+        let auth_config = build_auth_config(&base_url);
+        let cred_type = build_cred_type(
+            1,     // pref_credential: password
+            true,  // has_password
+            None,  // no fido
+            None,  // no cross_device
+            false, // no remote NGC
+        );
+        let auth_init = AuthInit { auth_config, cred_type };
+
+        // Mock password submission → returns MFA page with arr_user_proofs
+        let mfa_config_json = format!(
+            r#"{{
+                "sessionId": "mfa-session",
+                "sFT": "mfa-flow-token",
+                "sCtx": "mfa-ctx",
+                "canary": "mfa-canary",
+                "pgid": "ConvergedTFA",
+                "urlPost": "{base_url}/common/login",
+                "urlBeginAuth": "{base_url}/common/BeginAuth",
+                "urlEndAuth": "{base_url}/common/EndAuth",
+                "iMaxPollAttempts": 12,
+                "iPollingInterval": 5000,
+                "arrUserProofs": [
+                    {{"authMethodId": "PhoneAppNotification", "isDefault": true, "display": "Microsoft Authenticator"}},
+                    {{"authMethodId": "PhoneAppOTP", "isDefault": false, "display": "OTP"}}
+                ]
+            }}"#
+        );
+        server.mock_async(|when, then| {
+            when.method(POST).path("/common/login");
+            then.status(200)
+                .header("content-type", "text/html")
+                .body(build_config_html(&mfa_config_json));
+        })
+        .await;
+
+        // Mock BeginAuth endpoint
+        server.mock_async(|when, then| {
+            when.method(POST).path("/common/BeginAuth");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    r#"{"Success": true, "Ctx": "begin-auth-ctx", "FlowToken": "begin-auth-ft", "Entropy": 33}"#,
+                );
+        })
+        .await;
+
+        let app =
+            PublicClientApplication::new("test-client-id", Some(&base_url)).unwrap();
+        let result = app
+            .initiate_acquire_token_by_mfa_flow(
+                "user@example.com",
+                Some("test-password"),
+                vec!["openid"],
+                None,
+                &[AuthOption::NoDAGFallback],
+                Some(auth_init),
+                #[cfg(feature = "mfa_method_selection")]
+                None,
+            )
+            .await;
+
+        let mfa_continue = result.expect("should succeed with PhoneAppNotification MFA");
+        assert_eq!(
+            mfa_continue.selected_mfa_method_id,
+            Some("PhoneAppNotification".to_string())
+        );
+        assert!(!mfa_continue.fido_is_passkey);
+        assert_eq!(mfa_continue.mfa_methods.len(), 2);
+        assert!(mfa_continue.mfa_methods.contains(&"PhoneAppNotification".to_string()));
+        assert!(mfa_continue.mfa_methods.contains(&"PhoneAppOTP".to_string()));
+        assert!(mfa_continue.msg.contains("33"));
+    }
+
+    // Scenario 5: No passkey, no MFA → password only, auth code returned directly
+    #[tokio::test]
+    async fn mfa_scenario_5_password_only_no_mfa() {
+        let server = MockServer::start_async().await;
+        let base_url = server.base_url();
+
+        let auth_config = build_auth_config(&base_url);
+        let cred_type = build_cred_type(
+            1,     // pref_credential: password
+            true,  // has_password
+            None,  // no fido
+            None,  // no cross_device
+            false, // no remote NGC
+        );
+        let auth_init = AuthInit { auth_config, cred_type };
+
+        // Mock password submission → returns redirect with auth code (no MFA)
+        server.mock_async(|when, then| {
+            when.method(POST).path("/common/login");
+            then.status(302).header(
+                "location",
+                "https://login.microsoftonline.com/common/oauth2/nativeclient?code=test-auth-code-12345",
+            );
+        })
+        .await;
+
+        let app =
+            PublicClientApplication::new("test-client-id", Some(&base_url)).unwrap();
+        let result = app
+            .initiate_acquire_token_by_mfa_flow(
+                "user@example.com",
+                Some("test-password"),
+                vec!["openid"],
+                None,
+                &[AuthOption::NoDAGFallback],
+                Some(auth_init),
+                #[cfg(feature = "mfa_method_selection")]
+                None,
+            )
+            .await;
+
+        let mfa_continue = result.expect("should succeed with direct auth code");
+        assert_eq!(
+            mfa_continue.auth_code,
+            Some("test-auth-code-12345".to_string())
+        );
+        assert_eq!(mfa_continue.max_poll_attempts, Some(1));
+        assert_eq!(mfa_continue.polling_interval, Some(0));
+        assert!(mfa_continue.mfa_methods.is_empty());
+        assert!(!mfa_continue.fido_is_passkey);
     }
 }
