@@ -3009,12 +3009,7 @@ impl PublicClientApplication {
                     }
                 }
                 if let Some(ref arr_user_proofs) = auth_config.arr_user_proofs {
-                    debug!("MFA methods available (arr_user_proofs): [{}]",
-                        arr_user_proofs.iter()
-                            .map(|p| format!("{}(default={})", p.auth_method_id, p.is_default))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
+                    debug!("MFA methods available: {:?}", arr_user_proofs);
                     debug!("is_passkey_support_enabled={:?}, fido_is_a_passkey={}",
                         auth_config.is_passkey_support_enabled, fido_is_a_passkey);
 
@@ -6950,5 +6945,61 @@ impl BrokerClientApplication {
         let prt = self.unseal_user_prt(prt, tpm, prt_storage_key)?;
 
         Ok(prt.is_expired())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_access_token(payload_json: &str) -> String {
+        let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"none"}"#.as_bytes());
+        let payload = URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
+        format!("{}.{}.", header, payload)
+    }
+
+    fn build_user_token(access_token: String) -> UserToken {
+        UserToken {
+            token_type: "Bearer".to_string(),
+            scope: None,
+            expires_in: 3600,
+            ext_expires_in: 3600,
+            access_token: Some(access_token),
+            refresh_token: "refresh-token".to_string(),
+            id_token: IdToken::default(),
+            client_info: ClientInfo::default(),
+            #[cfg(feature = "broker")]
+            prt: None,
+        }
+    }
+
+    #[test]
+    fn user_token_spn_uses_upn_when_present() {
+        let access_token = build_access_token(
+            r#"{"amr":["pwd"],"tid":"11111111-1111-1111-1111-111111111111","upn":"user@example.com"}"#,
+        );
+        let token = build_user_token(access_token);
+
+        assert_eq!(token.spn().unwrap_or_default(), "user@example.com");
+    }
+
+    #[test]
+    fn user_token_spn_falls_back_to_unique_name() {
+        let access_token = build_access_token(
+            r#"{"amr":["pwd"],"tid":"11111111-1111-1111-1111-111111111111","unique_name":"alias@example.com"}"#,
+        );
+        let token = build_user_token(access_token);
+
+        assert_eq!(token.spn().unwrap_or_default(), "alias@example.com");
+    }
+
+    #[test]
+    fn user_token_spn_prefers_upn_when_both_fields_present() {
+        let access_token = build_access_token(
+            r#"{"amr":["pwd"],"tid":"11111111-1111-1111-1111-111111111111","upn":"primary@example.com","unique_name":"alias@example.com"}"#,
+        );
+        let token = build_user_token(access_token);
+
+        assert_eq!(token.spn().unwrap_or_default(), "primary@example.com");
     }
 }
