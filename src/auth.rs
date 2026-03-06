@@ -2792,12 +2792,13 @@ impl PublicClientApplication {
             };
         }
 
-        debug!("Credential type: pref_credential={}, has_password={}, has_fido={:?}, has_remote_ngc={:?}, has_access_pass={:?}",
+        debug!("Credential type: pref_credential={}, has_password={}, has_fido={:?}, has_remote_ngc={:?}, has_access_pass={:?}, is_passkey_support_enabled={:?}",
             cred_type.credentials.pref_credential,
             cred_type.credentials.has_password,
             cred_type.credentials.has_fido,
             cred_type.credentials.has_remote_ngc,
             cred_type.credentials.has_access_pass,
+            auth_config.is_passkey_support_enabled,
         );
         if let Some(ref fido_params) = cred_type.credentials.fido_params {
             debug!("FIDO params: has_cross_device_capable_passkey={:?}, allow_list_count={}",
@@ -2872,7 +2873,7 @@ impl PublicClientApplication {
             _ => {}
         }
 
-        // Now attempt to emulate the old behavior, attempting passwordless MFA
+        // Now attempt to emulate the old behavior, attempting passwordless
         // auth even if it isn't the preferred method.
         passwordless_tap!();
         passwordless_remote_ngc!();
@@ -3010,8 +3011,8 @@ impl PublicClientApplication {
                 }
                 if let Some(ref arr_user_proofs) = auth_config.arr_user_proofs {
                     debug!("MFA methods available: {:?}", arr_user_proofs);
-                    debug!("is_passkey_support_enabled={:?}, has_any_cross_device_fido={}",
-                        auth_config.is_passkey_support_enabled, has_any_cross_device_fido);
+                    let has_any_cross_device_fido = has_any_cross_device_fido
+                        || auth_config.is_passkey_support_enabled.unwrap_or(false);
 
                     // Try to use provided MFA method if available
                     let selected_auth_method = if let Some(requested_method) = mfa_method {
@@ -3019,6 +3020,7 @@ impl PublicClientApplication {
                             .iter()
                             .find(|proof| {
                                 proof.auth_method_id == requested_method
+                                    && (!has_any_cross_device_fido || proof.auth_method_id != "FidoKey")
                             })
                             .ok_or_else(|| {
                                 let available = arr_user_proofs
@@ -3032,11 +3034,11 @@ impl PublicClientApplication {
                             })?
                     } else if let Some(method) = arr_user_proofs.iter().find(|proof| {
                         proof.is_default
-                            && (auth_config.is_passkey_support_enabled.unwrap_or(false)
-                                || proof.auth_method_id != "FidoKey")
+                            && (!has_any_cross_device_fido || proof.auth_method_id != "FidoKey")
                     }) {
                         method
-                    } else if !auth_config.is_passkey_support_enabled.unwrap_or(false) {
+                    } else if has_any_cross_device_fido {
+                        // Skip FidoKey methods entirely if we can't use them
                         match arr_user_proofs
                             .iter()
                             .find(|proof| proof.auth_method_id == "PhoneAppNotification")
@@ -3047,7 +3049,7 @@ impl PublicClientApplication {
                             }) {
                             Some(method) => method,
                             None => {
-                                info!("No usable MFA methods found (FIDO was passkey)");
+                                info!("No usable MFA methods found (FIDO was cross-device)");
                                 dag_fallback!();
                             }
                         }
