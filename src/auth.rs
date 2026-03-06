@@ -3032,8 +3032,25 @@ impl PublicClientApplication {
                             })?
                     } else if let Some(method) = arr_user_proofs.iter().find(|proof| {
                         proof.is_default
+                            && (!auth_config.is_passkey_support_enabled.unwrap_or(false)
+                                || proof.auth_method_id != "FidoKey")
                     }) {
                         method
+                    } else if auth_config.is_passkey_support_enabled.unwrap_or(false) {
+                        match arr_user_proofs
+                            .iter()
+                            .find(|proof| proof.auth_method_id == "PhoneAppNotification")
+                            .or_else(|| {
+                                arr_user_proofs
+                                    .iter()
+                                    .find(|proof| proof.auth_method_id != "FidoKey")
+                            }) {
+                            Some(method) => method,
+                            None => {
+                                info!("No usable MFA methods found (FIDO was passkey)");
+                                dag_fallback!();
+                            }
+                        }
                     } else if arr_user_proofs.is_empty() {
                         info!("No MFA methods found");
                         dag_fallback!();
