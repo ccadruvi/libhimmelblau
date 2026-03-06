@@ -277,7 +277,7 @@ pub struct MFAAuthContinue {
     pub auth_code: Option<String>,
     /// Whether the FIDO credential is cross-device capable (e.g. synced passkey, MS Authenticator).
     /// Used to filter out passkeys from default MFA method selection.
-    pub fido_is_cross_device: bool,
+    pub has_any_cross_device_fido: bool,
 }
 
 impl From<DeviceAuthorizationResponse> for MFAAuthContinue {
@@ -346,7 +346,7 @@ impl MFAAuthContinue {
 
     fn mfa_method_is_cross_device(&self, method: &MfaMethodInfo) -> bool {
         if method.auth_method_id == "FidoKey" {
-            self.fido_is_cross_device
+            self.has_any_cross_device_fido
         } else {
             false
         }
@@ -2720,7 +2720,7 @@ impl PublicClientApplication {
                         }],
                         selected_mfa_method_id: Some("AccessPass".to_string()),
                         auth_code: None,
-                        fido_is_cross_device: false,
+                        has_any_cross_device_fido: false,
                     });
                 }
             };
@@ -2784,7 +2784,7 @@ impl PublicClientApplication {
                                 }],
                                 selected_mfa_method_id: Some("PhoneAppNotification".to_string()),
                                 auth_code: None,
-                                fido_is_cross_device: false,
+                                has_any_cross_device_fido: false,
                             });
                         }
                     }
@@ -2806,7 +2806,7 @@ impl PublicClientApplication {
             );
         }
 
-        let fido_is_cross_device = cred_type
+        let has_any_cross_device_fido = cred_type
             .credentials
             .fido_params
             .as_ref()
@@ -2857,7 +2857,7 @@ impl PublicClientApplication {
                             }],
                             selected_mfa_method_id: Some("FidoKey".to_string()),
                             auth_code: None,
-                            fido_is_cross_device: false,
+                            has_any_cross_device_fido: false,
                         });
                     }
                 }
@@ -3010,8 +3010,8 @@ impl PublicClientApplication {
                 }
                 if let Some(ref arr_user_proofs) = auth_config.arr_user_proofs {
                     debug!("MFA methods available: {:?}", arr_user_proofs);
-                    debug!("is_passkey_support_enabled={:?}, fido_is_cross_device={}",
-                        auth_config.is_passkey_support_enabled, fido_is_cross_device);
+                    debug!("is_passkey_support_enabled={:?}, has_any_cross_device_fido={}",
+                        auth_config.is_passkey_support_enabled, has_any_cross_device_fido);
 
                     // Try to use provided MFA method if available
                     let selected_auth_method = if let Some(requested_method) = mfa_method {
@@ -3183,7 +3183,7 @@ impl PublicClientApplication {
                             .collect(),
                         selected_mfa_method_id: Some(selected_auth_method.auth_method_id.clone()),
                         auth_code: None,
-                        fido_is_cross_device: fido_is_cross_device,
+                        has_any_cross_device_fido: has_any_cross_device_fido,
                     })
                 } else {
                     info!("No MFA methods found");
@@ -3215,7 +3215,7 @@ impl PublicClientApplication {
                     mfa_method_details: vec![],
                     selected_mfa_method_id: None,
                     auth_code: Some(auth_code),
-                    fido_is_cross_device: false,
+                    has_any_cross_device_fido: false,
                 })
             }
             Err(e) => {
