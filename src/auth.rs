@@ -275,9 +275,8 @@ pub struct MFAAuthContinue {
     /// When set, acquire_token_by_mfa_flow should skip polling and exchange
     /// this code directly for an access token.
     pub auth_code: Option<String>,
-    /// Whether the FIDO credential is cross-device capable (e.g. synced passkey, MS Authenticator).
-    /// Used to filter out passkeys from default MFA method selection.
-    pub has_any_cross_device_fido: bool,
+    /// Whether to skip FidoKey in MFA method selection.
+    pub skip_fido_for_mfa: bool,
 }
 
 impl From<DeviceAuthorizationResponse> for MFAAuthContinue {
@@ -311,7 +310,7 @@ impl MFAAuthContinue {
             method.auth_method_id
         } else if !self.mfa_methods.is_empty() {
             for method in self.get_mfa_method_details() {
-                if !self.mfa_method_is_cross_device(&method) {
+                if !self.should_skip_fido_method(&method) {
                     return method.auth_method_id.clone();
                 }
             }
@@ -344,9 +343,9 @@ impl MFAAuthContinue {
         self.get_available_mfa_methods().len()
     }
 
-    fn mfa_method_is_cross_device(&self, method: &MfaMethodInfo) -> bool {
+    fn should_skip_fido_method(&self, method: &MfaMethodInfo) -> bool {
         if method.auth_method_id == "FidoKey" {
-            self.has_any_cross_device_fido
+            self.skip_fido_for_mfa
         } else {
             false
         }
@@ -357,12 +356,12 @@ impl MFAAuthContinue {
         if let Some(details) = self
             .get_mfa_method_details()
             .into_iter()
-            .find(|method| method.is_default && !self.mfa_method_is_cross_device(method))
+            .find(|method| method.is_default && !self.should_skip_fido_method(method))
         {
             Some(details)
         } else if !self.mfa_methods.is_empty() {
             for method in self.get_mfa_method_details() {
-                if !self.mfa_method_is_cross_device(&method) {
+                if !self.should_skip_fido_method(&method) {
                     return Some(method);
                 }
             }
@@ -2720,7 +2719,7 @@ impl PublicClientApplication {
                         }],
                         selected_mfa_method_id: Some("AccessPass".to_string()),
                         auth_code: None,
-                        has_any_cross_device_fido: false,
+                        skip_fido_for_mfa: false,
                     });
                 }
             };
@@ -2784,7 +2783,7 @@ impl PublicClientApplication {
                                 }],
                                 selected_mfa_method_id: Some("PhoneAppNotification".to_string()),
                                 auth_code: None,
-                                has_any_cross_device_fido: false,
+                                skip_fido_for_mfa: false,
                             });
                         }
                     }
@@ -2807,7 +2806,7 @@ impl PublicClientApplication {
             );
         }
 
-        let has_any_cross_device_fido = cred_type
+        let user_has_any_cross_device_fido = cred_type
             .credentials
             .fido_params
             .as_ref()
@@ -2858,7 +2857,7 @@ impl PublicClientApplication {
                             }],
                             selected_mfa_method_id: Some("FidoKey".to_string()),
                             auth_code: None,
-                            has_any_cross_device_fido: false,
+                            skip_fido_for_mfa: false,
                         });
                     }
                 }
@@ -3011,7 +3010,7 @@ impl PublicClientApplication {
                 }
                 if let Some(ref arr_user_proofs) = auth_config.arr_user_proofs {
                     debug!("MFA methods available: {:?}", arr_user_proofs);
-                    let has_any_cross_device_fido = has_any_cross_device_fido
+                    let skip_fido_for_mfa = user_has_any_cross_device_fido
                         || auth_config.is_passkey_support_enabled.unwrap_or(false);
 
                     // Try to use provided MFA method if available
@@ -3020,7 +3019,7 @@ impl PublicClientApplication {
                             .iter()
                             .find(|proof| {
                                 proof.auth_method_id == requested_method
-                                    && (!has_any_cross_device_fido || proof.auth_method_id != "FidoKey")
+                                    && (!skip_fido_for_mfa || proof.auth_method_id != "FidoKey")
                             })
                             .ok_or_else(|| {
                                 let available = arr_user_proofs
@@ -3034,10 +3033,10 @@ impl PublicClientApplication {
                             })?
                     } else if let Some(method) = arr_user_proofs.iter().find(|proof| {
                         proof.is_default
-                            && (!has_any_cross_device_fido || proof.auth_method_id != "FidoKey")
+                            && (!skip_fido_for_mfa || proof.auth_method_id != "FidoKey")
                     }) {
                         method
-                    } else if has_any_cross_device_fido {
+                    } else if skip_fido_for_mfa {
                         // Skip FidoKey methods entirely if we can't use them
                         match arr_user_proofs
                             .iter()
@@ -3185,7 +3184,7 @@ impl PublicClientApplication {
                             .collect(),
                         selected_mfa_method_id: Some(selected_auth_method.auth_method_id.clone()),
                         auth_code: None,
-                        has_any_cross_device_fido: has_any_cross_device_fido,
+                        skip_fido_for_mfa: skip_fido_for_mfa,
                     })
                 } else {
                     info!("No MFA methods found");
@@ -3217,7 +3216,7 @@ impl PublicClientApplication {
                     mfa_method_details: vec![],
                     selected_mfa_method_id: None,
                     auth_code: Some(auth_code),
-                    has_any_cross_device_fido: false,
+                    skip_fido_for_mfa: false,
                 })
             }
             Err(e) => {
