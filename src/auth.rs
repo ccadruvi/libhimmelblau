@@ -277,6 +277,8 @@ pub struct MFAAuthContinue {
     pub auth_code: Option<String>,
     /// Whether to skip FidoKey in MFA method selection.
     pub skip_fido_for_mfa: bool,
+    /// Whether the user has a cross-device capable passkey (e.g. MS Authenticator).
+    pub has_cross_device_passkey: bool,
 }
 
 impl From<DeviceAuthorizationResponse> for MFAAuthContinue {
@@ -2718,6 +2720,7 @@ impl PublicClientApplication {
                         selected_mfa_method_id: Some("AccessPass".to_string()),
                         auth_code: None,
                         skip_fido_for_mfa: false,
+                        has_cross_device_passkey: false,
                     });
                 }
             };
@@ -2782,6 +2785,7 @@ impl PublicClientApplication {
                                 selected_mfa_method_id: Some("PhoneAppNotification".to_string()),
                                 auth_code: None,
                                 skip_fido_for_mfa: false,
+                                has_cross_device_passkey: false,
                             });
                         }
                     }
@@ -2857,6 +2861,7 @@ impl PublicClientApplication {
                             selected_mfa_method_id: Some("FidoKey".to_string()),
                             auth_code: None,
                             skip_fido_for_mfa: false,
+                            has_cross_device_passkey: user_has_any_cross_device_fido,
                         });
                     }
                 }
@@ -3184,6 +3189,7 @@ impl PublicClientApplication {
                         selected_mfa_method_id: Some(selected_auth_method.auth_method_id.clone()),
                         auth_code: None,
                         skip_fido_for_mfa: skip_fido_for_mfa,
+                        has_cross_device_passkey: false,
                     })
                 } else {
                     info!("No MFA methods found");
@@ -3216,6 +3222,7 @@ impl PublicClientApplication {
                     selected_mfa_method_id: None,
                     auth_code: Some(auth_code),
                     skip_fido_for_mfa: false,
+                    has_cross_device_passkey: false,
                 })
             }
             Err(e) => {
